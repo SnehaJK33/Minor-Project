@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🌲 Deforestation Analytics Dashboard - West Bengal</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <header>
+    <h1>🌿 West Bengal Deforestation Dashboard</h1>
+    <p>Monitor forest loss, analyze causes, and explore 10-year predictions</p>
+  </header>
+
+  <main class="container">
+    <!-- Left panel -->
+    <section class="controls">
+      <h2>📍 Select Location</h2>
+      <select id="location">
+        <option value="">-- Choose a District --</option>
+        <option>Alipurduar</option>
+        <option>Bankura</option>
+        <option>Birbhum</option>
+        <option>Cooch Behar</option>
+        <option>Darjeeling</option>
+        <option>Hooghly</option>
+        <option>Jalpaiguri</option>
+        <option>Murshidabad</option>
+        <option>Nadia</option>
+        <option>North 24 Parganas</option>
+        <option>South 24 Parganas</option>
+        <option>Paschim Medinipur</option>
+        <option>Purulia</option>
+      </select>
+
+      <button id="analyzeBtn">Analyze Deforestation</button>
+      <button id="downloadBtn">📄 Download Full Report</button>
+
+      <div id="summary" class="summary-card hidden"></div>
+    </section>
+
+    <!-- Right panel -->
+    <section class="charts">
+      <div class="chart-container">
+        <h3>📉 Historical Deforestation Rate</h3>
+        <canvas id="historyChart"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <h3>📈 10-Year Prediction</h3>
+        <canvas id="predictionChart"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Developed with ❤️ for Environmental Awareness</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
