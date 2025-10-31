@@ -1,14 +1,16 @@
 import os
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from fpdf import FPDF
 import pandas as pd
+from fpdf import FPDF
 
-# Ensure plot directory exists
-PLOT_DIR = os.path.join(os.path.dirname(__file__), 'plots')
+# ---------------- Directories ----------------
+BASE_DIR = os.path.abspath(os.path.dirname(_file)) if 'file_' in globals() else os.getcwd()
+PLOT_DIR = os.path.join(BASE_DIR, "plots")
 os.makedirs(PLOT_DIR, exist_ok=True)
 
-# Causes of deforestation (example data)
-# Causes of deforestation (updated)
+# ---------------- Static Data ----------------
 DEFORESTATION_CAUSES = {
     "Alipurduar": ["Logging", "Agricultural expansion", "Urbanization"],
     "Bankura": ["Mining", "Agriculture", "Deforestation for fuel"],
@@ -25,8 +27,6 @@ DEFORESTATION_CAUSES = {
     "Purulia": ["Mining", "Agriculture"]
 }
 
-
-# Methods to reduce deforestation
 DEFORESTATION_REDUCTION = [
     "Afforestation & Reforestation",
     "Sustainable agriculture",
@@ -35,23 +35,34 @@ DEFORESTATION_REDUCTION = [
     "Protected forest areas"
 ]
 
-# ------------------- Functions -------------------
+# ---------------- Utility Functions ----------------
 
 def filter_location_data(df, location):
-    """Filter dataset for a specific location (case-insensitive)."""
     df = df.rename(columns=lambda x: x.strip())
     df['District'] = df['District'].astype(str)
-    return df[df['District'].str.lower() == location.lower()]
+    filtered = df[df['District'].str.lower() == location.lower()]
+    if filtered.empty:
+        raise ValueError(f"No data available for {location}")
+    return filtered
 
 def summarize_deforestation(df):
+    df = df.copy()
+    for col in ['Deforestation_Rate_%', 'Temperature_C', 'Rainfall_mm', 'Pollution_Index']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['Deforestation_Rate_%'])
+    
     avg_rate = round(df['Deforestation_Rate_%'].mean(), 2)
     min_rate = round(df['Deforestation_Rate_%'].min(), 2)
     max_rate = round(df['Deforestation_Rate_%'].max(), 2)
     causes = DEFORESTATION_CAUSES.get(df['District'].iloc[0], [])
     reduction_methods = DEFORESTATION_REDUCTION
 
-    # 50-word summary text
-    text = f"The deforestation rate in {df['District'].iloc[0]} has fluctuated over the years with an average rate of {avg_rate}%. The major causes include {', '.join(causes)}. Recommended reduction methods are {', '.join(reduction_methods)} to ensure forest conservation and sustainable growth."
+    text = (
+        f"The deforestation rate in {df['District'].iloc[0]} has fluctuated over the years "
+        f"with an average rate of {avg_rate}%. The main causes are {', '.join(causes)}. "
+        f"Recommended reduction methods include {', '.join(reduction_methods)} "
+        f"to maintain forest cover and ensure sustainable growth."
+    )
 
     return {
         "average_rate": avg_rate,
@@ -62,81 +73,147 @@ def summarize_deforestation(df):
         "text": text
     }
 
+def summarize_environment(df):
+    df = df.copy()
+    for col in ["Temperature_C", "Rainfall_mm", "Pollution_Index"]:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    return {
+        "avg_temp": round(df["Temperature_C"].mean(), 2),
+        "avg_rainfall": round(df["Rainfall_mm"].mean(), 2),
+        "avg_pollution": round(df["Pollution_Index"].mean(), 2)
+    }
+
+def plot_history(df, location, column, color, title):
+    if column not in df.columns:
+        return None
+    df[column] = pd.to_numeric(df[column], errors='coerce')
+    df = df.dropna(subset=[column])
+    if df.empty:
+        return None
+    plt.figure(figsize=(6, 4))
+    plt.plot(df['Year'], df[column], marker='o', color=color)
+    plt.title(f"{title} - {location}")
+    plt.xlabel("Year")
+    plt.ylabel(column.replace("_", " "))
+    path = os.path.join(PLOT_DIR, f"{location}_{column}.png")
+    plt.savefig(path)
+    plt.close()
+    return path
 
 def predict_future_10_years(df, years=10):
-    """Predict future deforestation rates (simple 2% growth per year)."""
-    last_val = float(df['Deforestation_Rate_%'].iloc[-1])
-    future_rates = [round(last_val * (1 + 0.02*(i+1)), 2) for i in range(years)]
-    future_years = [int(df['Year'].iloc[-1]) + i + 1 for i in range(years)]
+    # Ensure the rate column is numeric
+    df['Deforestation_Rate_%'] = pd.to_numeric(df['Deforestation_Rate_%'], errors='coerce')
+    df = df.dropna(subset=['Deforestation_Rate_%'])
+    if df.empty or len(df) < 2:
+        return {"years": [], "rates": []}
+
+    # Sort by year in case CSV is unordered
+    df = df.sort_values('Year')
+
+    # Calculate the actual yearly changes from your data
+    year_diffs = df['Year'].diff().dropna()
+    rate_diffs = df['Deforestation_Rate_%'].diff().dropna()
+
+    # Average yearly change based on real data trend
+    avg_change_per_year = (rate_diffs / year_diffs).mean()
+
+    # Get last known values
+    last_year = int(df['Year'].iloc[-1])
+    last_rate = float(df['Deforestation_Rate_%'].iloc[-1])
+
+    # Predict next 'years' years using actual average change
+    future_years = [last_year + i + 1 for i in range(years)]
+    future_rates = [round(last_rate + avg_change_per_year * (i + 1), 2) for i in range(years)]
+
     return {"years": future_years, "rates": future_rates}
 
-def plot_history(df, location):
-    """Plot historical deforestation graph."""
-    plt.figure(figsize=(6,4))
-    plt.plot(df['Year'], df['Deforestation_Rate_%'], marker='o', color='red')
-    plt.title(f'Deforestation History - {location}')
-    plt.xlabel('Year')
-    plt.ylabel('Deforestation Rate (%)')
-    path = os.path.join(PLOT_DIR, f'{location}_history.png')
-    plt.savefig(path)
-    plt.close()
-    return path
 
-def plot_prediction(future_data, location):
-    """Plot predicted deforestation graph."""
-    plt.figure(figsize=(6,4))
-    plt.plot(future_data['years'], future_data['rates'], marker='o', color='green')
-    plt.title(f'Deforestation Prediction - {location}')
-    plt.xlabel('Year')
-    plt.ylabel('Predicted Deforestation Rate (%)')
-    path = os.path.join(PLOT_DIR, f'{location}_prediction.png')
-    plt.savefig(path)
-    plt.close()
-    return path
+# ---------------- PDF Generator ----------------
+def safe_text(text):
+    """Remove any emoji/unicode unsupported by Latin-1."""
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.encode("latin-1", "replace").decode("latin-1")
+    return text
 
 def generate_pdf_report(location, df, summary, future_data):
-    """Generate a PDF report including history, prediction, and summary."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"Deforestation Report - {location}", ln=True, align='C')
+    pdf.cell(0, 10, safe_text(f"Deforestation Report - {location}"), ln=True, align="C")
     pdf.ln(10)
 
-    # Historical plot
-    history_path = plot_history(df, location)
-    pdf.image(history_path, x=15, w=180)
-    pdf.ln(10)
-
-    # Historical data table
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(0, 8, "Historical Deforestation Data:", ln=True)
-    for idx, row in df.iterrows():
-        pdf.cell(0, 8, f"{row['Year']}: {row['Deforestation_Rate_%']}%", ln=True)
-    pdf.ln(5)
-
-    # Prediction plot
-    prediction_path = plot_prediction(future_data, location)
-    pdf.image(prediction_path, x=15, w=180)
-    pdf.ln(10)
-
-    # Summary
+    # ---------------- Historical Table ----------------
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 8, "Summary:", ln=True)
+    pdf.cell(0, 8, safe_text("Historical Data"), ln=True)
     pdf.set_font("Arial", "", 12)
-    pdf.cell(0, 8, f"Average Rate: {summary['average_rate']}%", ln=True)
-    pdf.cell(0, 8, f"Minimum Rate: {summary['min_rate']}%", ln=True)
-    pdf.cell(0, 8, f"Maximum Rate: {summary['max_rate']}%", ln=True)
+    for col in ['Year','Deforestation_Rate_%','Rainfall_mm','Temperature_C','Pollution_Index']:
+        if col not in df.columns:
+            df[col] = "N/A"
+    pdf.cell(25, 8, "Year", 1)
+    pdf.cell(45, 8, "Deforestation Rate (%)", 1)
+    pdf.cell(35, 8, "Rainfall (mm)", 1)
+    pdf.cell(35, 8, "Temperature (°C)", 1)
+    pdf.cell(35, 8, "Pollution Index", 1)
+    pdf.ln()
+    for _, row in df.iterrows():
+        pdf.cell(25, 8, str(row['Year']), 1)
+        pdf.cell(45, 8, str(row['Deforestation_Rate_%']), 1)
+        pdf.cell(35, 8, str(row['Rainfall_mm']), 1)
+        pdf.cell(35, 8, str(row['Temperature_C']), 1)
+        pdf.cell(35, 8, str(row['Pollution_Index']), 1)
+        pdf.ln()
     pdf.ln(5)
 
-    pdf.cell(0, 8, "Causes of Deforestation:", ln=True)
+    # ---------------- Prediction Table ----------------
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 8, safe_text("10-Year Prediction"), ln=True)
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(25, 8, "Year", 1)
+    pdf.cell(45, 8, "Predicted Rate (%)", 1)
+    pdf.cell(35, 8, "Rainfall (mm)", 1)
+    pdf.cell(35, 8, "Temperature (°C)", 1)
+    pdf.cell(35, 8, "Pollution Index", 1)
+    pdf.ln()
+    last_row = df.iloc[-1]
+    for i, year in enumerate(future_data["years"]):
+        pdf.cell(25, 8, str(year), 1)
+        pdf.cell(45, 8, str(future_data["rates"][i]), 1)
+        pdf.cell(35, 8, str(last_row["Rainfall_mm"]), 1)
+        pdf.cell(35, 8, str(last_row["Temperature_C"]), 1)
+        pdf.cell(35, 8, str(last_row["Pollution_Index"]), 1)
+        pdf.ln()
+    pdf.ln(5)
+
+    # ---------------- Charts ----------------
+    for col, color, title in [
+        ("Deforestation_Rate_%", "red", "Deforestation History"),
+        ("Temperature_C", "orange", "Temperature Over Years"),
+        ("Rainfall_mm", "blue", "Rainfall Over Years"),
+        ("Pollution_Index", "purple", "Pollution Over Years")
+    ]:
+        path = plot_history(df, location, col, color, title)
+        if path:
+            pdf.image(path, x=15, w=180)
+            pdf.ln(5)
+
+    # ---------------- Summary ----------------
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 8, safe_text("Deforestation Summary:"), ln=True)
+    pdf.set_font("Arial", "", 12)
+    pdf.multi_cell(0, 8, safe_text(summary['text']))
+    pdf.cell(0, 8, safe_text(f"Average Rate: {summary['average_rate']}%"), ln=True)
+    pdf.cell(0, 8, safe_text(f"Min Rate: {summary['min_rate']}% | Max Rate: {summary['max_rate']}%"), ln=True)
+    pdf.ln(5)
+
+    pdf.cell(0, 8, safe_text("Causes of Deforestation:"), ln=True)
     for cause in summary['causes']:
-        pdf.cell(0, 8, f"- {cause}", ln=True)
+        pdf.cell(0, 8, safe_text(f"- {cause}"), ln=True)
 
-    pdf.ln(5)
-    pdf.cell(0, 8, "Methods to Reduce Deforestation:", ln=True)
+    pdf.cell(0, 8, safe_text("Reduction Methods:"), ln=True)
     for method in summary['reduction_methods']:
-        pdf.cell(0, 8, f"- {method}", ln=True)
+        pdf.cell(0, 8, safe_text(f"- {method}"), ln=True)
 
-    pdf_path = os.path.join(os.path.dirname(__file__), f'report_{location}.pdf')
+    pdf_path = os.path.join(BASE_DIR, f"report_{location}.pdf")
     pdf.output(pdf_path)
     return pdf_path
