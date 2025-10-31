@@ -2,57 +2,76 @@ from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 import pandas as pd
 import os
-from utils import filter_location_data, summarize_deforestation, predict_future_10_years, generate_pdf_report
 
+# Import helper functions from utils.py
+from utils import (
+    filter_location_data,
+    summarize_deforestation,
+    summarize_environment,
+    predict_future_10_years,
+    generate_pdf_report
+)
+
+# ---------------- App Setup ----------------
 app = Flask(__name__)
 CORS(app)
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), 'data.csv')
-df = pd.read_csv(DATA_PATH)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "data.csv")
 
-@app.route('/api/data/<location>', methods=['GET'])
+# Load dataset once at startup
+try:
+    df = pd.read_csv(DATA_PATH)
+    df.columns = df.columns.str.strip()  # remove accidental spaces in headers
+except Exception as e:
+    raise RuntimeError(f"Error loading dataset: {e}")
+
+# ---------------- Routes ----------------
+
+@app.route("/api/data/<location>")
 def get_data(location):
-    location_data = filter_location_data(df, location)
-    if location_data.empty:
-        return jsonify({"error": "Location not found"}), 404
-    history = location_data.to_dict(orient='records')
-    return jsonify({"location": location, "history": history})
+    """Return historical data for a specific district."""
+    try:
+        data = filter_location_data(df, location)
+        history = data.to_dict(orient="records")
+        return jsonify({"history": history})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
-@app.route('/api/summary/<location>', methods=['GET'])
+
+@app.route("/api/summary/<location>")
 def get_summary(location):
-    location_data = filter_location_data(df, location)
-    if location_data.empty:
-        return jsonify({"error": "Location not found"}), 404
+    """Return summary, environment, and future prediction for a district."""
+    try:
+        data = filter_location_data(df, location)
+        defo_summary = summarize_deforestation(data)
+        future = predict_future_10_years(data)
+        env_summary = summarize_environment(data)
 
-    summary = summarize_deforestation(location_data)
-    future = predict_future_10_years(location_data)
+        return jsonify({
+            "summary": defo_summary,
+            "future": future,
+            "environment": env_summary
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
-    # Ensure JSON serializable
-    future_json = {
-        "years": [int(y) for y in future['years']],
-        "rates": [float(r) for r in future['rates']]
-    }
 
-    return jsonify({
-        "location": location,
-        "summary": summary,
-        "future": future_json
-    })
-
-@app.route('/api/report/<location>', methods=['GET'])
+@app.route("/api/report/<location>")
 def download_report(location):
-    location_data = filter_location_data(df, location)
-    if location_data.empty:
-        return jsonify({"error": "Location not found"}), 404
+    """Generate and download a full PDF report for a district."""
+    try:
+        data = filter_location_data(df, location)
+        summary = summarize_deforestation(data)
+        future = predict_future_10_years(data)
+        path = generate_pdf_report(location, data, summary, future)
+        return send_file(path, as_attachment=True)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        return jsonify({"error": f"Report generation failed: {e}"}), 500
 
-    summary = summarize_deforestation(location_data)
-    future = predict_future_10_years(location_data)
-    pdf_path = generate_pdf_report(location, location_data, summary, future)
 
-    if os.path.exists(pdf_path):
-        return send_file(pdf_path, as_attachment=True)
-    else:
-        return jsonify({"error": "Report not generated"}), 500
-
+# ---------------- Main Entry ----------------
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8000)
+    app.run(port=8000, debug=True)
