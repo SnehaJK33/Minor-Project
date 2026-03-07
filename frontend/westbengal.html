@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>West Bengal Deforestation Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+body {
+  font-family: "Poppins", sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f1f8f4;
+  color: #263238;
+}
+body.dark {
+  background: #121212;
+  color: #e0e0e0;
+}
+header {
+  background: linear-gradient(135deg, #1b5e20, #4caf50);
+  color: white;
+  text-align: center;
+  padding: 36px 20px;
+}
+section {
+  background: #fff;
+  max-width: 1100px;
+  margin: 28px auto;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+body.dark section {
+  background: #1e1e1e;
+}
+h2 {
+  color: #1b5e20;
+  border-left: 6px solid #43a047;
+  padding-left: 10px;
+}
+body.dark h2 {
+  color: #a5d6a7;
+}
+.button {
+  background: linear-gradient(135deg, #2e7d32, #66bb6a);
+  color: white;
+  border: none;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+canvas {
+  width: 100% !important;
+  max-height: 380px;
+  margin-top: 14px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 14px;
+}
+th, td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+}
+body.dark th, body.dark td {
+  border-color: #555;
+}
+.report-box {
+  margin-top: 24px;
+  background: #e8f5e9;
+  padding: 16px;
+  border-left: 5px solid #43a047;
+  border-radius: 10px;
+}
+body.dark .report-box {
+  background: #263238;
+  color: #e0e0e0;
+}
+footer {
+  background: #1b5e20;
+  color: white;
+  text-align: center;
+  padding: 14px;
+  margin-top: 30px;
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>West Bengal Deforestation Dashboard</h1>
+  <p>Forest Cover Overall, Drivers Type, and Gain/Loss Data</p>
+  <button class="button" onclick="toggleDarkMode()">Dark Mode</button>
+</header>
+
+<section id="pdfContent">
+  <h2>West Bengal Dataset Analysis</h2>
+  <p>Data source: <code>MAIN DATA - Sheet1.csv</code>, <code>MAIN DATA - Sheet2.csv</code>, <code>MAIN DATA - overall gain and lose data.csv</code></p>
+  <button class="button" onclick="analyze()">Analyze</button>
+  <button class="button" onclick="downloadPDF()">Download PDF</button>
+
+  <h3>Forest Cover + Drivers Trend (Sheet1 + Sheet2)</h3>
+  <canvas id="lineChart"></canvas>
+
+  <h3>5-Year Forecast (Tree Cover Loss)</h3>
+  <canvas id="predictionChart"></canvas>
+
+  <h3>Drivers Data Trend (Sheet2)</h3>
+  <canvas id="driversChart"></canvas>
+
+  <h3>District Risk-Zone Clustering</h3>
+  <canvas id="clusterChart"></canvas>
+
+  <h3>Gas Emissions Trend (Gas CSV)</h3>
+  <canvas id="urbanChart"></canvas>
+
+  <h3>Fire Loss Trend</h3>
+  <canvas id="populationChart"></canvas>
+
+  <h3>Rainforest Loss Trend</h3>
+  <canvas id="rainforestChart"></canvas>
+
+  <h3>District-wise Deforestation Share</h3>
+  <canvas id="pieChart"></canvas>
+
+  <h3>Overall Gain/Loss Metrics (Sheet3)</h3>
+  <canvas id="gainLossBarChart"></canvas>
+
+  <div id="report" class="report-box" style="display:none;"></div>
+</section>
+
+<footer>Institute of Engineering & Management | Minor Project | 2025</footer>
+
+<script>
+const BASE_URL = "http://127.0.0.1:8000/api";
+let pieChart, gainLossBarChart, lineChart, predictionChart, driversChart, clusterChart, urbanChart, populationChart, rainforestChart;
+const LOSS_VISUAL_FACTOR = 10.0;
+
+function safeNumber(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(String(v).replace(/,/g, "").replace(/%/g, "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+async function fetchForestOverall() {
+  const res = await fetch(`${BASE_URL}/wb/forest_overall`);
+  if (!res.ok) throw new Error(`forest_overall failed: ${res.status}`);
+  const json = await res.json();
+  return json.history || [];
+}
+
+async function fetchDrivers() {
+  const res = await fetch(`${BASE_URL}/wb/drivers`);
+  if (!res.ok) throw new Error(`drivers failed: ${res.status}`);
+  const json = await res.json();
+  return json.records || [];
+}
+
+async function fetchGainLoss() {
+  const res = await fetch(`${BASE_URL}/wb/gain_loss`);
+  if (!res.ok) throw new Error(`gain_loss failed: ${res.status}`);
+  const json = await res.json();
+  return json.summary || {};
+}
+
+async function fetchDistrictDeforestation() {
+  const res = await fetch(`${BASE_URL}/wb/district_deforestation`);
+  if (!res.ok) throw new Error(`district_deforestation failed: ${res.status}`);
+  const json = await res.json();
+  return {
+    districts: json.districts || [],
+    lossHa: json.loss_ha || []
+  };
+}
+
+async function fetchPrediction() {
+  const res = await fetch(`${BASE_URL}/wb/prediction`);
+  if (!res.ok) throw new Error(`prediction failed: ${res.status}`);
+  const json = await res.json();
+  return json.future_prediction_5_years || { years: [], rates: [] };
+}
+
+async function fetchGas() {
+  const res = await fetch(`${BASE_URL}/wb/gas`);
+  if (!res.ok) throw new Error(`gas failed: ${res.status}`);
+  const json = await res.json();
+  return {
+    years: json.years || [],
+    allGases: json.all_gases_mg || [],
+    nonCo2: json.non_co2_mg || [],
+    co2Only: json.co2_only_mg || []
+  };
+}
+
+async function fetchDistrictRiskClusters() {
+  const res = await fetch(`${BASE_URL}/wb/district_risk_clusters`);
+  if (!res.ok) throw new Error(`district_risk_clusters failed: ${res.status}`);
+  const json = await res.json();
+  return json.clusters || [];
+}
+
+async function analyze() {
+  try {
+    const [forestRows, driverRows, gainLoss, prediction, gas, districtClusters, districtDef] = await Promise.all([
+      fetchForestOverall(),
+      fetchDrivers(),
+      fetchGainLoss(),
+      fetchPrediction(),
+      fetchGas(),
+      fetchDistrictRiskClusters(),
+      fetchDistrictDeforestation()
+    ]);
+
+    const rows = forestRows
+      .map(r => ({
+        year: safeNumber(r.Year),
+        loss: safeNumber(r.Tree_Cover_Lose_ha) ?? 0,
+        ghg: safeNumber(r["Green-House_Gases"]) ?? 0,
+        fire: safeNumber(r.Tree_cover_loss_from_fires) ?? 0,
+        rainforest: safeNumber(r.Tree_cover_loss_rainforest) ?? 0
+      }))
+      .filter(r => r.year !== null)
+      .sort((a, b) => a.year - b.year);
+
+    if (!rows.length) {
+      alert("No data available.");
+      return;
+    }
+
+    const years = rows.map(r => r.year);
+    const lossSeries = rows.map(r => r.loss);
+    const ghgSeries = rows.map(r => r.ghg);
+    const fireSeries = rows.map(r => r.fire);
+    const rainforestSeries = rows.map(r => r.rainforest);
+
+    const pieCtx = document.getElementById("pieChart").getContext("2d");
+    if (pieChart) pieChart.destroy();
+    const lossVisual = (safeNumber(gainLoss.loss) ?? 0) * LOSS_VISUAL_FACTOR;
+
+    pieChart = new Chart(pieCtx, {
+      type: "doughnut",
+      data: {
+        labels: districtDef.districts,
+        datasets: [{
+          data: (districtDef.lossHa || []).map(v => safeNumber(v) ?? 0)
+        }]
+      }
+    });
+
+    const gainLossBarCtx = document.getElementById("gainLossBarChart").getContext("2d");
+    if (gainLossBarChart) gainLossBarChart.destroy();
+    gainLossBarChart = new Chart(gainLossBarCtx, {
+      type: "bar",
+      data: {
+        labels: ["Stable", "Loss", "Gain", "Disturb", "Net", "Change (%)"],
+        datasets: [{
+          label: "Overall gain/loss sheet values",
+          data: [
+            safeNumber(gainLoss.stable) ?? 0,
+            lossVisual,
+            safeNumber(gainLoss.gain) ?? 0,
+            safeNumber(gainLoss.disturb) ?? 0,
+            safeNumber(gainLoss.net) ?? 0,
+            safeNumber(gainLoss.change) ?? 0
+          ],
+          backgroundColor: ["#90a4ae", "#e53935", "#43a047", "#ff9800", "#5e35b1", "#00897b"]
+        }]
+      }
+    });
+
+    // Build yearly Loss_area_ha (Sheet2) to combine with Sheet1 series.
+    const lossAreaByYear = new Map();
+    for (const r of driverRows) {
+      const y = safeNumber(r.Year);
+      if (y === null) continue;
+      const v = safeNumber(r.Loss_area_ha) ?? 0;
+      lossAreaByYear.set(y, (lossAreaByYear.get(y) || 0) + v);
+    }
+    const lossAreaSeries = years.map(y => Number((lossAreaByYear.get(y) || 0).toFixed(2)));
+
+    const lineCtx = document.getElementById("lineChart").getContext("2d");
+    if (lineChart) lineChart.destroy();
+    lineChart = new Chart(lineCtx, {
+      type: "line",
+      data: {
+        labels: years,
+        datasets: [
+          {
+            label: "Tree_Cover_Lose_ha",
+            data: lossSeries,
+            borderColor: "#2e7d32",
+            backgroundColor: "#2e7d3222",
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Tree_cover_loss_from_fires",
+            data: fireSeries,
+            borderColor: "#d32f2f",
+            backgroundColor: "#d32f2f22",
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Tree_cover_loss_rainforest",
+            data: rainforestSeries,
+            borderColor: "#00897b",
+            backgroundColor: "#00897b22",
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Loss_area_ha (Sheet2 sum by year)",
+            data: lossAreaSeries,
+            borderColor: "#6a1b9a",
+            backgroundColor: "#6a1b9a22",
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Green-House_Gases",
+            data: ghgSeries,
+            borderColor: "#1565c0",
+            backgroundColor: "#1565c022",
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          y: {
+            type: "linear",
+            position: "left",
+            title: { display: true, text: "Loss / Area (ha)" }
+          },
+          y1: {
+            type: "linear",
+            position: "right",
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: "Green-House_Gases" }
+          }
+        }
+      }
+    });
+
+    const forecastYears = (prediction.years || []).map(v => safeNumber(v)).filter(v => v !== null);
+    const forecastRates = (prediction.rates || []).map(v => safeNumber(v)).filter(v => v !== null);
+    const predCtx = document.getElementById("predictionChart").getContext("2d");
+    if (predictionChart) predictionChart.destroy();
+    predictionChart = new Chart(predCtx, {
+      type: "line",
+      data: {
+        labels: forecastYears,
+        datasets: [{
+          label: "Forecast Tree Cover Loss (ha) [Sheet1+Sheet2]",
+          data: forecastRates,
+          borderColor: "#ef6c00",
+          backgroundColor: "#ef6c0022",
+          borderWidth: 3,
+          fill: true,
+          tension: 0.3
+        }]
+      }
+    });
+
+    // Drivers trend chart (top 6 by total loss area)
+    const driversByType = {};
+    const yearSet = new Set();
+    for (const r of driverRows) {
+      const y = safeNumber(r.Year);
+      const d = String(r.Drivers_type || "N/A");
+      const v = safeNumber(r.Loss_area_ha) ?? 0;
+      if (y === null) continue;
+      yearSet.add(y);
+      if (!driversByType[d]) driversByType[d] = {};
+      driversByType[d][y] = (driversByType[d][y] || 0) + v;
+    }
+    const driverYears = Array.from(yearSet).sort((a, b) => a - b);
+    const topDrivers = Object.entries(driversByType)
+      .map(([name, byYear]) => ({
+        name,
+        total: Object.values(byYear).reduce((a, b) => a + b, 0),
+        byYear
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+    const palette = ["#2e7d32", "#1565c0", "#ef6c00", "#8e24aa", "#d32f2f", "#00897b"];
+    const driversCtx = document.getElementById("driversChart").getContext("2d");
+    if (driversChart) driversChart.destroy();
+    driversChart = new Chart(driversCtx, {
+      type: "line",
+      data: {
+        labels: driverYears,
+        datasets: topDrivers.map((d, i) => ({
+          label: d.name,
+          data: driverYears.map(y => Number((d.byYear[y] || 0).toFixed(2))),
+          borderColor: palette[i % palette.length],
+          backgroundColor: (palette[i % palette.length] + "22"),
+          borderWidth: 2,
+          tension: 0.25
+        }))
+      }
+    });
+
+    const clusterCtx = document.getElementById("clusterChart").getContext("2d");
+    if (clusterChart) clusterChart.destroy();
+    const riskColor = { Low: "#43a047", Medium: "#f9a825", High: "#e53935" };
+    const clusterDatasets = (districtClusters || []).map(d => ({
+      label: `${d.district} (${d.risk_zone})`,
+      data: [{ x: safeNumber(d.avg_loss_ha) ?? 0, y: safeNumber(d.avg_gas_mg) ?? 0 }],
+      backgroundColor: riskColor[d.risk_zone] || "#607d8b",
+      pointRadius: 6
+    }));
+    clusterChart = new Chart(clusterCtx, {
+      type: "scatter",
+      data: {
+        datasets: clusterDatasets
+      },
+      options: {
+        scales: {
+          x: { title: { display: true, text: "Average Loss (ha)" } },
+          y: { title: { display: true, text: "Average Gas (Mg)" } }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                const p = ctx.raw || {};
+                return `${ctx.dataset.label}: Loss ${Number(p.x || 0).toFixed(2)}, Gas ${Number(p.y || 0).toFixed(2)}`;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const urbanCtx = document.getElementById("urbanChart").getContext("2d");
+    if (urbanChart) urbanChart.destroy();
+    urbanChart = new Chart(urbanCtx, {
+      type: "line",
+      data: {
+        labels: (gas.years || []).map(v => safeNumber(v)).filter(v => v !== null),
+        datasets: [
+          {
+            label: "All Gases (Mg CO2e)",
+            data: (gas.allGases || []).map(v => safeNumber(v) ?? 0),
+            borderColor: "#1565c0",
+            backgroundColor: "#1565c022",
+            borderWidth: 3,
+            fill: false,
+            tension: 0.25
+          },
+          {
+            label: "CO2 Only (Mg CO2e)",
+            data: (gas.co2Only || []).map(v => safeNumber(v) ?? 0),
+            borderColor: "#2e7d32",
+            backgroundColor: "#2e7d3222",
+            borderWidth: 3,
+            fill: false,
+            tension: 0.25
+          },
+          {
+            label: "Non-CO2 (Mg CO2e)",
+            data: (gas.nonCo2 || []).map(v => safeNumber(v) ?? 0),
+            borderColor: "#ef6c00",
+            backgroundColor: "#ef6c0022",
+            borderWidth: 3,
+            fill: false,
+            tension: 0.25
+          }
+        ]
+      }
+    });
+
+    const popCtx = document.getElementById("populationChart").getContext("2d");
+    if (populationChart) populationChart.destroy();
+    populationChart = new Chart(popCtx, {
+      type: "line",
+      data: {
+        labels: years,
+        datasets: [
+          {
+            label: "Loss from Fires",
+            data: fireSeries,
+            borderColor: "#d32f2f",
+            backgroundColor: "#d32f2f22",
+            borderWidth: 3,
+            fill: true,
+            tension: 0.25
+          }
+        ]
+      }
+    });
+
+    const rainforestCtx = document.getElementById("rainforestChart").getContext("2d");
+    if (rainforestChart) rainforestChart.destroy();
+    rainforestChart = new Chart(rainforestCtx, {
+      type: "line",
+      data: {
+        labels: years,
+        datasets: [
+          {
+            label: "Rainforest Loss",
+            data: rainforestSeries,
+            borderColor: "#00897b",
+            backgroundColor: "#00897b22",
+            borderWidth: 3,
+            fill: true,
+            tension: 0.25
+          }
+        ]
+      }
+    });
+
+    const totalLoss = lossSeries.reduce((a, b) => a + b, 0);
+    const avgLoss = totalLoss / lossSeries.length;
+    const report = document.getElementById("report");
+    report.style.display = "block";
+    const highRiskDistricts = (districtClusters || [])
+      .filter(d => String(d.risk_zone) === "High")
+      .map(d => d.district)
+      .join(", ");
+    report.innerHTML = `
+      <h3>Summary</h3>
+      <p><b>State:</b> West Bengal</p>
+      <p><b>Years:</b> ${years.join(", ")}</p>
+      <p><b>Total Tree Cover Loss (ha):</b> ${totalLoss.toFixed(2)}</p>
+      <p><b>Average Yearly Loss (ha):</b> ${avgLoss.toFixed(2)}</p>
+      <p><b>Gain (ha):</b> ${(safeNumber(gainLoss.gain) ?? 0).toFixed(2)}</p>
+      <p><b>Loss (ha):</b> ${(safeNumber(gainLoss.loss) ?? 0).toFixed(2)}</p>
+      <p><b>Stable (ha):</b> ${(safeNumber(gainLoss.stable) ?? 0).toFixed(2)}</p>
+      <p><b>Net (ha):</b> ${(safeNumber(gainLoss.net) ?? 0).toFixed(2)}</p>
+      <p><b>Change (%):</b> ${(safeNumber(gainLoss.change) ?? 0).toFixed(4)}</p>
+      <p><b>Prediction Model:</b> ${prediction.model_name || "Combined regression (Sheet1 + Sheet2)"}</p>
+      <p><b>Model Accuracy (R²):</b> ${safeNumber(prediction.model_accuracy_r2) === null ? "N/A" : safeNumber(prediction.model_accuracy_r2).toFixed(4)}</p>
+      <p><b>Validation R² (CV):</b> ${safeNumber(prediction.cv_r2) === null ? "N/A" : safeNumber(prediction.cv_r2).toFixed(4)}</p>
+      <p><b>Validation MAE (CV):</b> ${safeNumber(prediction.cv_mae) === null ? "N/A" : safeNumber(prediction.cv_mae).toFixed(4)}</p>
+      <p><b>Validation RMSE (CV):</b> ${safeNumber(prediction.cv_rmse) === null ? "N/A" : safeNumber(prediction.cv_rmse).toFixed(4)}</p>
+      <p><b>Training Samples:</b> ${safeNumber(prediction.training_samples) === null ? "N/A" : Math.round(safeNumber(prediction.training_samples))}</p>
+      <p><b>High Risk Districts (Clustering):</b> ${highRiskDistricts || "None"}</p>
+    `;
+  } catch (err) {
+    console.error(err);
+    alert("Could not analyze data. Check backend server and CSV file names.");
+  }
+}
+
+async function downloadPDF() {
+  const pdfSection = document.getElementById("pdfContent");
+  const canvas = await html2canvas(pdfSection, { scale: 2 });
+  const imgData = canvas.toDataURL("image/png");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pdfWidth = pdf.internal.pageSize.getWidth();
+  const pdfHeight = pdf.internal.pageSize.getHeight();
+  const imgWidth = pdfWidth;
+  const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+  let heightLeft = imgHeight;
+  let position = 0;
+  pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+  heightLeft -= pdfHeight;
+  while (heightLeft > 0) {
+    position = heightLeft - imgHeight;
+    pdf.addPage();
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pdfHeight;
+  }
+  pdf.save("WestBengal_Deforestation_Report.pdf");
+}
+
+function toggleDarkMode() {
+  document.body.classList.toggle("dark");
+}
+</script>
+</body>
+</html>

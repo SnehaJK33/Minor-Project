@@ -4,61 +4,265 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>🌲 Deforestation Analytics Dashboard - West Bengal</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
 
+  <style>
+    /* ===== Global Reset ===== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Poppins", sans-serif;
+      background: #f5faf7;
+      color: #2e3831;
+      line-height: 1.8;
+      scroll-behavior: smooth;
+    }
+
+    /* ===== Header Section ===== */
+    header {
+      background: linear-gradient(135deg, #1b5e20, #43a047);
+      color: #ffffff;
+      text-align: center;
+      padding: 70px 20px 60px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      border-bottom: 4px solid #66bb6a;
+    }
+
+    header h1 {
+      font-size: 38px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: 0.6px;
+    }
+
+    header p {
+      font-size: 17px;
+      color: #d9f7df;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    /* ===== Section Container ===== */
+    section {
+      background: #ffffff;
+      max-width: 1000px;
+      margin: 45px auto;
+      padding: 45px 50px;
+      border-radius: 18px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      animation: fadeInUp 0.8s ease-in-out;
+    }
+
+    section:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    /* ===== Section Titles ===== */
+    h2 {
+      color: #1b5e20;
+      font-size: 26px;
+      margin-bottom: 20px;
+      text-align: center;
+      position: relative;
+      padding-bottom: 10px;
+    }
+
+    h2::after {
+      content: "";
+      display: block;
+      width: 70px;
+      height: 4px;
+      background: #43a047;
+      margin: 8px auto 0;
+      border-radius: 10px;
+    }
+
+    /* ===== Paragraphs ===== */
+    p {
+      text-align: justify;
+      margin-bottom: 15px;
+      font-size: 16.5px;
+    }
+
+    /* ===== List Styling ===== */
+    ul {
+      list-style: none;
+      padding: 0;
+      margin-top: 10px;
+    }
+
+    ul li {
+      margin: 10px 0;
+      position: relative;
+      padding-left: 28px;
+      font-size: 16px;
+      text-align: left;
+    }
+
+    ul li::before {
+      content: "🌿";
+      position: absolute;
+      left: 0;
+      font-size: 18px;
+    }
+
+    /* ===== Team Section ===== */
+    .team p {
+      text-align: center;
+      font-size: 16px;
+      line-height: 2;
+    }
+
+    .team b {
+      color: #1b5e20;
+      display: inline-block;
+    }
+
+    .team i {
+      display: block;
+      color: #555;
+      font-size: 15px;
+      margin-top: 8px;
+    }
+
+    /* ===== Buttons Section ===== */
+    .btn-container {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 25px;
+      margin-top: 30px;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, #2e7d32, #66bb6a);
+      color: white;
+      padding: 12px 35px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 16px;
+      transition: all 0.3s ease;
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn:hover {
+      background: linear-gradient(135deg, #1b5e20, #43a047);
+      transform: translateY(-3px);
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+    }
+
+    /* ===== Footer ===== */
+    footer {
+      background: #1b5e20;
+      color: white;
+      text-align: center;
+      padding: 18px 0;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+      margin-top: 60px;
+      border-top: 4px solid #43a047;
+    }
+
+    /* ===== Animation ===== */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(25px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* ===== Responsive Design ===== */
+    @media (max-width: 768px) {
+      header h1 {
+        font-size: 28px;
+      }
+
+      section {
+        padding: 30px 20px;
+        margin: 25px 15px;
+      }
+
+      h2 {
+        font-size: 22px;
+      }
+
+      p, ul li {
+        font-size: 15px;
+      }
+
+      .btn {
+        font-size: 14px;
+        padding: 10px 25px;
+      }
+    }
+  </style>
+</head>
+
+<body>
   <header>
-    <h1>🌿 West Bengal Deforestation Dashboard</h1>
-    <p>Monitor forest loss, analyze causes, and explore 10-year predictions</p>
+    <h1>🌿 West Bengal Deforestation Analytics Dashboard</h1>
+    <p>Visualizing forest loss trends and promoting environmental awareness through data-driven insights</p>
   </header>
 
-  <main class="container">
-    <!-- Left panel -->
-    <section class="controls">
-      <h2>📍 Select Location</h2>
-      <select id="location">
-        <option value="">-- Choose a District --</option>
-        <option>Alipurduar</option>
-        <option>Bankura</option>
-        <option>Birbhum</option>
-        <option>Cooch Behar</option>
-        <option>Darjeeling</option>
-        <option>Hooghly</option>
-        <option>Jalpaiguri</option>
-        <option>Murshidabad</option>
-        <option>Nadia</option>
-        <option>North 24 Parganas</option>
-        <option>South 24 Parganas</option>
-        <option>Paschim Medinipur</option>
-        <option>Purulia</option>
-      </select>
+  <section class="intro">
+    <h2>🌲 About the Project</h2>
+    <p>
+      The <b>Deforestation Analytics Dashboard</b> is a data visualization project developed to analyze 
+      deforestation trends across <b>West Bengal</b>. It utilizes forest cover datasets to present 
+      insightful patterns and highlight environmental impacts caused by deforestation.
+    </p>
+    <p>
+      The system allows users to explore <b>district-wise</b> and <b>state-level</b> analytics 
+      through an interactive and visually appealing dashboard. This initiative aims to support 
+      research, awareness, and sustainable planning for a greener future.
+    </p>
+  </section>
 
-      <button id="analyzeBtn">Analyze Deforestation</button>
-      <button id="downloadBtn">📄 Download Full Report</button>
+  <section class="team">
+    <h2>👩‍💻 Project Members</h2>
+    <p>
+      <b>Sneha Mohalanobish</b><br>
+      <b>Soumi Sen</b><br>
+      <b>Sneha Prasad</b><br>
+      <b>Sneha Ghosh</b><br>
+      <b>Sudipa Bera</b><br>
+      <b>Sree Dey</b>
+    <i>Under the guidance of <b>[Faculty Name]</b></i>
+    </p>
+  </section>
 
-      <div id="summary" class="summary-card hidden"></div>
-    </section>
+  <section class="tools">
+    <h2>🛠️ Tools & Technologies Used</h2>
+    <ul>
+      <li><b>Frontend:</b> HTML, CSS, JavaScript</li>
+      <li><b>Visualization:</b> Chart.js, Matplotlib (Python)</li>
+      <li><b>Backend:</b> Python Flask Framework</li>
+      <li><b>Data Analysis:</b> Pandas, NumPy</li>
+      <li><b>Machine Learning Model:</b> Scikit-learn Linear Regression</li>
+      <li><b>Dataset:</b> Forest cover data of West Bengal (Government & Satellite Sources)</li>
+    </ul>
+  </section>
 
-    <!-- Right panel -->
-    <section class="charts">
-      <div class="chart-container">
-        <h3>📉 Historical Deforestation Rate</h3>
-        <canvas id="historyChart"></canvas>
-      </div>
-
-      <div class="chart-container">
-        <h3>📈 10-Year Prediction</h3>
-        <canvas id="predictionChart"></canvas>
-      </div>
-    </section>
-  </main>
+  <section class="buttons">
+    <h2>📊 Explore the Dashboard</h2>
+    <div class="btn-container">
+      <a href="district.html" class="btn">📍 District-Wise Analysis</a>
+      <a href="westbengal.html" class="btn">🌏 State-Level Analysis</a>
+    </div>
+  </section>
 
   <footer>
-    <p>Developed with ❤️ for Environmental Awareness</p>
+    <p>Institute of Engineering & Management | Minor Project | 2025</p>
   </footer>
-
-  <script src="script.js"></script>
 </body>
 </html>
