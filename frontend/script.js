@@ -218,7 +218,12 @@ analyzeBtn.addEventListener("click", async () => {
   try {
     const dataJson = await fetchJSON(`${BASE_URL}/data/${encodeURIComponent(location)}`);
     const summaryJson = await fetchJSON(`${BASE_URL}/summary/${encodeURIComponent(location)}`);
-    const gainJson = await fetchJSON(`${BASE_URL}/district/gain/${encodeURIComponent(location)}`);
+    let gainJson = { gain_ha: 0 };
+    try {
+      gainJson = await fetchJSON(`${BASE_URL}/district/gain/${encodeURIComponent(location)}`);
+    } catch (gainErr) {
+      console.warn("Gain dataset missing for district, fallback to 0:", gainErr.message);
+    }
     const history = dataJson.history || [];
     // Deduplicate history by Year (keep last occurrence) and sort by year
     function dedupeByYear(rows) {
