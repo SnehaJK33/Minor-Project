@@ -1,4 +1,4 @@
-const BASE_URL = "http://127.0.0.1:8000/api";
+const BASE_URL = "/api";
 
 const locationSelect = document.getElementById("location");
 const analyzeBtn = document.getElementById("analyzeBtn");
