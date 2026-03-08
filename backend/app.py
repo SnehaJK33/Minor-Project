@@ -435,12 +435,12 @@ def load_wb_data():
 df_forest, df_drivers, df_gain_loss, df_gas, df_district, df_district_gain = load_wb_data()
 
 
-@app.route("/", methods=["GET"])
+@app.route("/", methods=["GET"], strict_slashes=False)
 def home():
     return send_from_directory(FRONTEND_DIR, "index.html")
 
 
-@app.route("/westbengal", methods=["GET"])
+@app.route("/westbengal", methods=["GET"], strict_slashes=False)
 def westbengal_page():
     return send_from_directory(FRONTEND_DIR, "westbengal.html")
 
@@ -450,7 +450,7 @@ def westbengal_page_html():
     return send_from_directory(FRONTEND_DIR, "westbengal.html")
 
 
-@app.route("/district", methods=["GET"])
+@app.route("/district", methods=["GET"], strict_slashes=False)
 def district_page():
     return send_from_directory(FRONTEND_DIR, "District.html")
 
