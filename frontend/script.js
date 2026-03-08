@@ -193,15 +193,35 @@ function normalizeFuturePrediction(future, history) {
 // -------------------------------------
 // Safe Fetch Function (No JSON Crash)
 // -------------------------------------
-async function fetchJSON(url) {
-  const res = await fetch(url);
+async function fetchJSON(url, retries = 3) {
+  let lastErr = null;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API Error (${res.status}): ${text}`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        const text = await res.text();
+        const compact = (text || "").replace(/\s+/g, " ").slice(0, 180);
+        const retriable = [502, 503, 504].includes(res.status);
+        if (retriable && attempt < retries) {
+          await new Promise(r => setTimeout(r, 1200 * attempt));
+          continue;
+        }
+        throw new Error(`API Error (${res.status}): ${compact || "Server error"}`);
+      }
+
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200 * attempt));
+        continue;
+      }
+    }
   }
 
-  return await res.json();
+  throw lastErr || new Error("Request failed");
 }
 
 // -------------------------------------
