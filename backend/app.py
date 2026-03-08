@@ -445,9 +445,24 @@ def westbengal_page():
     return send_from_directory(FRONTEND_DIR, "westbengal.html")
 
 
+@app.route("/westbengal.html", methods=["GET"])
+def westbengal_page_html():
+    return send_from_directory(FRONTEND_DIR, "westbengal.html")
+
+
 @app.route("/district", methods=["GET"])
 def district_page():
     return send_from_directory(FRONTEND_DIR, "District.html")
+
+
+@app.route("/district.html", methods=["GET"])
+def district_page_html():
+    return send_from_directory(FRONTEND_DIR, "District.html")
+
+
+@app.route("/index.html", methods=["GET"])
+def index_page_html():
+    return send_from_directory(FRONTEND_DIR, "index.html")
 
 
 @app.route("/<path:filename>", methods=["GET"])
