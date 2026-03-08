@@ -1,10 +1,11 @@
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import pandas as pd
 import os
 import math
 import numpy as np
 from io import BytesIO
+from werkzeug.exceptions import NotFound
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
@@ -15,6 +16,8 @@ app = Flask(__name__)
 CORS(app)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 FOREST_CSV = os.path.join(DATA_DIR, "MAIN DATA - Sheet1.csv")
 DRIVERS_CSV = os.path.join(DATA_DIR, "MAIN DATA - Sheet2.csv")
@@ -434,10 +437,28 @@ df_forest, df_drivers, df_gain_loss, df_gas, df_district, df_district_gain = loa
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "message": "Deforestation Monitoring API Running",
-        "status": "success"
-    })
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.route("/westbengal", methods=["GET"])
+def westbengal_page():
+    return send_from_directory(FRONTEND_DIR, "westbengal.html")
+
+
+@app.route("/district", methods=["GET"])
+def district_page():
+    return send_from_directory(FRONTEND_DIR, "District.html")
+
+
+@app.route("/<path:filename>", methods=["GET"])
+def frontend_assets(filename):
+    # Serve frontend files (script.js/style.css/html). API routes continue using /api/*.
+    if filename.startswith("api/"):
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    try:
+        return send_from_directory(FRONTEND_DIR, filename)
+    except NotFound:
+        return jsonify({"status": "error", "message": "Not found"}), 404
 
 
 @app.route("/api/wb/forest_overall", methods=["GET"])
