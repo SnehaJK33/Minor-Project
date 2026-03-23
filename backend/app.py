@@ -1,19 +1,39 @@
+
 from flask import Flask, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import pandas as pd
 import os
-import math
-import numpy as np
 from io import BytesIO
 from werkzeug.exceptions import NotFound
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+
+from utils import (
+    _district_history_frame,
+    _district_prediction_trend,
+    _normalize_district_name,
+    _safe_float,
+    _to_num,
+    build_combined_prediction,
+    build_district_risk_clusters,
+    clean_json,
+)
+
+BUILD_VERSION = "2026-03-21-05"
 
 app = Flask(__name__)
-CORS(app)
+# Allow frontend dev server (Live Server) to call the API.
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "http://127.0.0.1:5500",
+                "http://localhost:5500",
+                "http://127.0.0.1:8000",
+                "http://localhost:8000",
+            ]
+        }
+    },
+)
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
@@ -23,344 +43,8 @@ FOREST_CSV = os.path.join(DATA_DIR, "MAIN DATA - Sheet1.csv")
 DRIVERS_CSV = os.path.join(DATA_DIR, "MAIN DATA - Sheet2.csv")
 GAIN_LOSS_CSV = os.path.join(DATA_DIR, "MAIN DATA - overall gain and lose data.csv")
 GAS_CSV = os.path.join(DATA_DIR, "MAIN DATA - gas.csv")
-DISTRICT_CSV = os.path.join(DATA_DIR, "ALL DATASETS - district_data.csv")
+DISTRICT_CSV = os.path.join(DATA_DIR, "MAIN DATA - district_data.csv")
 DISTRICT_GAIN_CSV = os.path.join(DATA_DIR, "ALL DATASETS - overall gain forest .csv")
-
-DISTRICT_ALIASES = {
-    "paschim bardhaman": "Bardhaman",
-    "purba bardhaman": "Bardhaman",
-    "jhargram": "Paschim Medinipur",
-    "kalimpong": "Darjeeling",
-}
-
-
-def clean_json(obj):
-    if isinstance(obj, dict):
-        return {k: clean_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_json(v) for v in obj]
-    if hasattr(obj, "item"):
-        obj = obj.item()
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        return None
-    return obj
-
-
-def _to_num(df, cols):
-    for c in cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
-
-def _linear_future(values, n_years):
-    arr = np.asarray(values, dtype=float)
-    if arr.size == 0:
-        return np.zeros(n_years, dtype=float)
-    if arr.size == 1:
-        return np.repeat(arr[-1], n_years)
-
-    x = np.arange(arr.size, dtype=float)
-    slope, intercept = np.polyfit(x, arr, 1)
-    fx = np.arange(arr.size, arr.size + n_years, dtype=float)
-    return intercept + slope * fx
-
-
-def _safe_float(v):
-    try:
-        if v is None:
-            return None
-        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-            return None
-        return float(v)
-    except Exception:
-        return None
-
-
-def _normalize_district_name(name):
-    raw = (name or "").strip()
-    if not raw:
-        return raw
-    return DISTRICT_ALIASES.get(raw.lower(), raw)
-
-
-def _district_history_frame(df_district, location):
-    district_name = _normalize_district_name(location)
-    d = df_district[df_district["adm2"].astype(str).str.lower() == district_name.lower()].copy()
-    if d.empty:
-        return district_name, d
-
-    d = d.sort_values("umd_tree_cover_loss__year").copy()
-    d["Year"] = pd.to_numeric(d["umd_tree_cover_loss__year"], errors="coerce")
-    d["Tree_Cover_Loss_ha"] = pd.to_numeric(d["umd_tree_cover_loss__ha"], errors="coerce")
-    d["Deforestation_Rate_%"] = d["Tree_Cover_Loss_ha"]  # Keep frontend compatibility.
-    d["Green-House_Gases"] = pd.to_numeric(d["gfw_gross_emissions_co2e_all_gases__Mg"], errors="coerce")
-    d["Pollution Index (AQI)"] = d["Green-House_Gases"] / 1000.0
-
-    # Estimate district fire-related loss from state-level yearly fire/loss ratio (Sheet1).
-    fire_ratio_by_year = {}
-    if "Year" in df_forest.columns and "Tree_cover_loss_from_fires" in df_forest.columns and "Tree_Cover_Lose_ha" in df_forest.columns:
-        wb_tmp = df_forest[["Year", "Tree_cover_loss_from_fires", "Tree_Cover_Lose_ha"]].dropna().copy()
-        for _, r in wb_tmp.iterrows():
-            y = int(r["Year"])
-            total = float(r["Tree_Cover_Lose_ha"]) if r["Tree_Cover_Lose_ha"] is not None else 0.0
-            fire = float(r["Tree_cover_loss_from_fires"]) if r["Tree_cover_loss_from_fires"] is not None else 0.0
-            fire_ratio_by_year[y] = (fire / total) if total > 0 else 0.0
-    default_fire_ratio = float(np.mean(list(fire_ratio_by_year.values()))) if fire_ratio_by_year else 0.0
-    d["Tree_cover_loss_from_fires"] = d.apply(
-        lambda r: (r["Tree_Cover_Loss_ha"] or 0.0) * fire_ratio_by_year.get(int(r["Year"]), default_fire_ratio),
-        axis=1,
-    )
-
-    # Not present in district CSV, keep as missing for charts/tables.
-    d["Rainfall_mm"] = np.nan
-    d["Temperature_C"] = np.nan
-    d["Urbanization Rate (%)"] = np.nan
-    d["Population (Est.)"] = np.nan
-    return district_name, d
-
-
-def _district_prediction(history_df, n_years=5):
-    rows = history_df.dropna(subset=["Year", "Tree_Cover_Loss_ha"]).copy()
-    if len(rows) < 3:
-        vals = rows["Tree_Cover_Loss_ha"].tolist()
-        years = rows["Year"].astype(int).tolist()
-        fut = _linear_future(vals, n_years) if vals else []
-        future_years = [int(years[-1] + i) for i in range(1, n_years + 1)] if years else []
-        return {
-            "years": future_years,
-            "rates": [round(float(max(v, 0.0)), 2) for v in fut],
-            "model_name": "Fallback linear trend (district CSV)",
-            "training_samples": int(len(rows)),
-            "used_fallback": True,
-        }
-
-    rows = rows.sort_values("Year").copy()
-    X = rows[["Year", "Green-House_Gases"]].fillna(0.0).astype(float)
-    y = rows["Tree_Cover_Loss_ha"].astype(float).values
-
-    model = RandomForestRegressor(n_estimators=500, random_state=42)
-    n_splits = max(2, min(5, len(X) - 1))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-
-    fold_mae, fold_rmse, fold_r2 = [], [], []
-    for tr, te in tscv.split(X):
-        Xtr, Xte = X.iloc[tr], X.iloc[te]
-        ytr, yte = y[tr], y[te]
-        model.fit(Xtr, ytr)
-        pred = model.predict(Xte)
-        fold_mae.append(mean_absolute_error(yte, pred))
-        fold_rmse.append(math.sqrt(mean_squared_error(yte, pred)))
-        if len(yte) >= 2:
-            fold_r2.append(r2_score(yte, pred))
-
-    model.fit(X, y)
-    train_pred = model.predict(X)
-    train_r2 = r2_score(y, train_pred) if len(y) >= 2 else None
-
-    last_year = int(rows["Year"].max())
-    future_years = [last_year + i for i in range(1, n_years + 1)]
-    future_ghg = _linear_future(rows["Green-House_Gases"].fillna(0.0).values, n_years)
-    Xf = pd.DataFrame({"Year": future_years, "Green-House_Gases": future_ghg}).astype(float)
-    fut_pred = model.predict(Xf)
-
-    return {
-        "years": future_years,
-        "rates": [round(float(max(v, 0.0)), 2) for v in fut_pred.tolist()],
-        "model_name": "RandomForestRegressor (district CSV)",
-        "training_samples": int(len(rows)),
-        "model_accuracy_r2": _safe_float(round(train_r2, 4)) if train_r2 is not None else None,
-        "cv_mae": _safe_float(round(float(np.mean(fold_mae)), 4)) if fold_mae else None,
-        "cv_rmse": _safe_float(round(float(np.mean(fold_rmse)), 4)) if fold_rmse else None,
-        "cv_r2": _safe_float(round(float(np.mean(fold_r2)), 4)) if fold_r2 else None,
-        "used_fallback": False,
-    }
-
-
-def build_combined_prediction(forest_df, drivers_df, n_years=5):
-    required_sheet1 = [
-        "Year",
-        "Tree_Cover_Lose_ha",
-        "Green-House_Gases",
-        "Tree_cover_loss_from_fires",
-        "Tree_cover_loss_rainforest",
-    ]
-    forest = forest_df[required_sheet1].dropna(subset=["Year", "Tree_Cover_Lose_ha"]).copy()
-    if forest.empty:
-        return {
-            "years": [],
-            "rates": [],
-            "model_name": "Ensemble model (Sheet1 + Sheet2)",
-            "training_samples": 0,
-            "used_fallback": True,
-        }
-
-    # Sheet2 contributes yearly Loss_area_ha (summed across all driver types).
-    drivers = drivers_df[["Year", "Loss_area_ha"]].dropna(subset=["Year"]).copy()
-    driver_total = (
-        drivers.groupby("Year", as_index=False)["Loss_area_ha"]
-        .sum()
-        .rename(columns={"Loss_area_ha": "Loss_area_ha"})
-    )
-
-    merged = forest.merge(driver_total, on="Year", how="left")
-    merged = merged.fillna(0.0).sort_values("Year").reset_index(drop=True)
-    merged["Year"] = merged["Year"].astype(int)
-
-    if len(merged) < 3:
-        years = merged["Year"].astype(int).tolist()
-        vals = merged["Tree_Cover_Lose_ha"].astype(float).tolist()
-        fut_vals = _linear_future(vals, n_years)
-        future_years = [int(years[-1] + i) for i in range(1, n_years + 1)] if years else []
-        return {
-            "years": future_years,
-            "rates": [round(float(max(v, 0.0)), 2) for v in fut_vals],
-            "model_name": "Fallback linear trend (limited samples)",
-            "training_samples": int(len(merged)),
-            "used_fallback": True,
-        }
-
-    feature_cols = [
-        "Year",
-        "Green-House_Gases",
-        "Tree_cover_loss_from_fires",
-        "Tree_cover_loss_rainforest",
-        "Loss_area_ha",
-    ]
-    X = merged[feature_cols].astype(float).copy()
-    y = merged["Tree_Cover_Lose_ha"].astype(float).values
-
-    # Use Random Forest as requested.
-    model_name = "RandomForestRegressor (features: Sheet1 + Sheet2)"
-    model = RandomForestRegressor(n_estimators=500, random_state=42)
-    n_splits = max(2, min(5, len(X) - 1))
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-
-    fold_mae = []
-    fold_r2 = []
-    fold_rmse = []
-    for train_idx, test_idx in tscv.split(X):
-        X_train = X.iloc[train_idx]
-        X_test = X.iloc[test_idx]
-        y_train = y[train_idx]
-        y_test = y[test_idx]
-        model.fit(X_train, y_train)
-        pred = model.predict(X_test)
-        fold_mae.append(mean_absolute_error(y_test, pred))
-        fold_rmse.append(math.sqrt(mean_squared_error(y_test, pred)))
-        if len(y_test) >= 2:
-            fold_r2.append(r2_score(y_test, pred))
-
-    cv_mae = float(np.mean(fold_mae)) if fold_mae else None
-    cv_rmse = float(np.mean(fold_rmse)) if fold_rmse else None
-    cv_r2 = float(np.mean(fold_r2)) if fold_r2 else None
-
-    # Fit model on all historical data.
-    model.fit(X, y)
-    train_pred = model.predict(X)
-    train_r2 = r2_score(y, train_pred) if len(y) >= 2 else None
-
-    future_years = [int(merged["Year"].iloc[-1] + i) for i in range(1, n_years + 1)]
-
-    # Forecast future exogenous features with trend, then predict target.
-    future_features = pd.DataFrame({"Year": future_years})
-    future_features["Green-House_Gases"] = _linear_future(merged["Green-House_Gases"].values, n_years)
-    future_features["Tree_cover_loss_from_fires"] = _linear_future(merged["Tree_cover_loss_from_fires"].values, n_years)
-    future_features["Tree_cover_loss_rainforest"] = _linear_future(merged["Tree_cover_loss_rainforest"].values, n_years)
-    future_features["Loss_area_ha"] = _linear_future(merged["Loss_area_ha"].values, n_years)
-    future_X = future_features[feature_cols].astype(float).copy()
-    fut_pred = model.predict(future_X)
-
-    return {
-        "years": future_years,
-        "rates": [round(float(max(v, 0.0)), 2) for v in fut_pred.tolist()],
-        "model_name": model_name,
-        "training_samples": int(len(merged)),
-        "model_accuracy_r2": None if train_r2 is None else round(float(train_r2), 4),
-        "cv_mae": None if cv_mae is None else round(float(cv_mae), 4),
-        "cv_rmse": None if cv_rmse is None else round(float(cv_rmse), 4),
-        "cv_r2": None if cv_r2 is None else round(float(cv_r2), 4),
-        "feature_columns": feature_cols,
-        "used_fallback": False,
-    }
-
-
-def build_district_risk_clusters(df_district):
-    if df_district.empty:
-        return []
-
-    d = df_district.copy()
-    d["umd_tree_cover_loss__ha"] = pd.to_numeric(d["umd_tree_cover_loss__ha"], errors="coerce")
-    d["gfw_gross_emissions_co2e_all_gases__Mg"] = pd.to_numeric(
-        d["gfw_gross_emissions_co2e_all_gases__Mg"], errors="coerce"
-    )
-    d = d.dropna(subset=["adm2", "umd_tree_cover_loss__ha"])
-    if d.empty:
-        return []
-
-    grouped = d.groupby("adm2")
-    rows = []
-    for district, g in grouped:
-        g = g.sort_values("umd_tree_cover_loss__year")
-        losses = g["umd_tree_cover_loss__ha"].dropna().values
-        gases = g["gfw_gross_emissions_co2e_all_gases__Mg"].dropna().values
-        if len(losses) == 0:
-            continue
-        avg_loss = float(np.mean(losses))
-        recent_loss = float(np.mean(losses[-3:])) if len(losses) >= 3 else float(np.mean(losses))
-        avg_gas = float(np.mean(gases)) if len(gases) else 0.0
-        loss_trend = 0.0
-        if len(losses) >= 2:
-            x = np.arange(len(losses), dtype=float)
-            slope, _ = np.polyfit(x, losses.astype(float), 1)
-            loss_trend = float(slope)
-        rows.append(
-            {
-                "district": district,
-                "avg_loss_ha": avg_loss,
-                "recent_loss_ha": recent_loss,
-                "avg_gas_mg": avg_gas,
-                "loss_trend": loss_trend,
-            }
-        )
-
-    if len(rows) < 3:
-        # Not enough districts for 3 clusters; mark by quantiles.
-        sorted_rows = sorted(rows, key=lambda r: r["avg_loss_ha"])
-        for i, r in enumerate(sorted_rows):
-            if i < len(sorted_rows) / 3:
-                r["risk_zone"] = "Low"
-            elif i < 2 * len(sorted_rows) / 3:
-                r["risk_zone"] = "Medium"
-            else:
-                r["risk_zone"] = "High"
-        return sorted_rows
-
-    feat = np.array(
-        [[r["avg_loss_ha"], r["recent_loss_ha"], r["avg_gas_mg"], r["loss_trend"]] for r in rows],
-        dtype=float,
-    )
-    scaler = StandardScaler()
-    X = scaler.fit_transform(feat)
-
-    model = KMeans(n_clusters=3, random_state=42, n_init=20)
-    labels = model.fit_predict(X)
-    centers = scaler.inverse_transform(model.cluster_centers_)
-
-    # Rank clusters by risk score based on loss and gas.
-    scores = []
-    for i, c in enumerate(centers):
-        # c: [avg_loss, recent_loss, avg_gas, trend]
-        score = float(0.5 * c[0] + 0.3 * c[1] + 0.2 * c[2] + 0.1 * c[3])
-        scores.append((i, score))
-    scores = sorted(scores, key=lambda x: x[1])
-    risk_map = {scores[0][0]: "Low", scores[1][0]: "Medium", scores[2][0]: "High"}
-
-    for i, r in enumerate(rows):
-        r["cluster_id"] = int(labels[i])
-        r["risk_zone"] = risk_map[int(labels[i])]
-    return rows
-
 
 def load_wb_data():
     try:
@@ -412,6 +96,12 @@ def load_wb_data():
                 "gfw_gross_emissions_co2e_all_gases__Mg",
             ],
         )
+        # Winsorize extreme loss outliers to stabilize district models.
+        loss_col = "umd_tree_cover_loss__ha"
+        loss_vals = pd.to_numeric(district[loss_col], errors="coerce")
+        if not loss_vals.dropna().empty:
+            cap = float(loss_vals.dropna().quantile(0.95))
+            district[loss_col] = loss_vals.clip(upper=cap)
         district_gain = _to_num(
             district_gain,
             [
@@ -445,7 +135,15 @@ def westbengal_page():
     return send_from_directory(FRONTEND_DIR, "westbengal.html")
 
 
+@app.route("/WestBengal", methods=["GET"], strict_slashes=False)
+@app.route("/westBengal", methods=["GET"], strict_slashes=False)
+def westbengal_page_alias():
+    return send_from_directory(FRONTEND_DIR, "westbengal.html")
+
+
 @app.route("/westbengal.html", methods=["GET"])
+@app.route("/WestBengal.html", methods=["GET"])
+@app.route("/westBengal.html", methods=["GET"])
 def westbengal_page_html():
     return send_from_directory(FRONTEND_DIR, "westbengal.html")
 
@@ -455,7 +153,13 @@ def district_page():
     return send_from_directory(FRONTEND_DIR, "District.html")
 
 
+@app.route("/District", methods=["GET"], strict_slashes=False)
+def district_page_alias():
+    return send_from_directory(FRONTEND_DIR, "District.html")
+
+
 @app.route("/district.html", methods=["GET"])
+@app.route("/District.html", methods=["GET"])
 def district_page_html():
     return send_from_directory(FRONTEND_DIR, "District.html")
 
@@ -463,6 +167,20 @@ def district_page_html():
 @app.route("/index.html", methods=["GET"])
 def index_page_html():
     return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.route("/frontend", methods=["GET"], strict_slashes=False)
+def frontend_root():
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.route("/frontend/<path:filename>", methods=["GET"])
+def frontend_prefixed_assets(filename):
+    if filename.startswith("api/"):
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    if filename.lower() == "district.html":
+        return send_from_directory(FRONTEND_DIR, "District.html")
+    return send_from_directory(FRONTEND_DIR, filename)
 
 
 @app.route("/<path:filename>", methods=["GET"])
@@ -543,16 +261,32 @@ def wb_gain_loss():
 
 @app.route("/api/wb/prediction", methods=["GET"])
 def wb_prediction():
-    pred = build_combined_prediction(df_forest, df_drivers, n_years=5)
-    return jsonify(
-        clean_json(
-            {
-                "status": "success",
-                "state": "West Bengal",
+    try:
+        pred = build_combined_prediction(df_forest, df_drivers, n_years=5)
+        return jsonify(
+            clean_json(
+                {
+                    "status": "success",
+                    "state": "West Bengal",
                 "future_prediction_5_years": pred,
+                "build_version": BUILD_VERSION,
             }
         )
     )
+    except Exception as exc:
+        import traceback
+
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                    "build_version": BUILD_VERSION,
+                }
+            ),
+            500,
+        )
 
 
 @app.route("/api/wb/gas", methods=["GET"])
@@ -631,7 +365,7 @@ def wb_district_deforestation():
 
 @app.route("/api/data/<location>", methods=["GET"])
 def district_data(location):
-    district_name, hist = _district_history_frame(df_district, location)
+    district_name, hist = _district_history_frame(df_district, location, df_forest)
     if hist.empty:
         return jsonify({"status": "error", "message": f"District '{location}' not found."}), 404
 
@@ -662,18 +396,26 @@ def district_data(location):
 
 @app.route("/api/summary/<location>", methods=["GET"])
 def district_summary(location):
-    district_name, hist = _district_history_frame(df_district, location)
+    district_name, hist = _district_history_frame(df_district, location, df_forest)
     if hist.empty:
         return jsonify({"status": "error", "message": f"District '{location}' not found."}), 404
 
     rate = pd.to_numeric(hist["Deforestation_Rate_%"], errors="coerce")
-    pred = _district_prediction(hist, n_years=5)
-    latest = float(rate.dropna().iloc[-1]) if not rate.dropna().empty else 0.0
-    risk = "Low"
-    if latest >= 60:
-        risk = "High"
-    elif latest >= 20:
-        risk = "Medium"
+    pred = _district_prediction_trend(hist, n_years=5)
+    cluster_rows = build_district_risk_clusters(df_district)
+    risk = "Unknown"
+    district_key = district_name.lower().strip()
+    for row in cluster_rows:
+        if str(row.get("district", "")).lower().strip() == district_key:
+            risk = str(row.get("risk_zone", "Unknown"))
+            break
+    if risk == "Unknown":
+        latest = float(rate.dropna().iloc[-1]) if not rate.dropna().empty else 0.0
+        risk = "Low"
+        if latest >= 60:
+            risk = "High"
+        elif latest >= 20:
+            risk = "Medium"
 
     summary = {
         "average_deforestation_rate": _safe_float(rate.mean()),
@@ -690,10 +432,12 @@ def district_summary(location):
         clean_json(
             {
                 "status": "success",
+                "build_version": BUILD_VERSION,
                 "location": district_name,
                 "summary": summary,
                 "environment": env,
                 "future_prediction_5_years": pred,
+                "prediction_source": "district_elasticnet_lags",
                 "risk_assessment": {"risk_level": risk},
             }
         )
@@ -702,7 +446,7 @@ def district_summary(location):
 
 @app.route("/api/report/<location>", methods=["GET"])
 def district_report(location):
-    district_name, hist = _district_history_frame(df_district, location)
+    district_name, hist = _district_history_frame(df_district, location, df_forest)
     if hist.empty:
         return jsonify({"status": "error", "message": f"District '{location}' not found."}), 404
 
@@ -748,3 +492,4 @@ if __name__ == "__main__":
         port=8000,
         debug=True
     )
+

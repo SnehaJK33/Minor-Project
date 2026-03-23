@@ -139,7 +139,11 @@ footer {
 <footer>Institute of Engineering & Management | Minor Project | 2025</footer>
 
 <script>
-const BASE_URL = "/api";
+const API_ORIGIN =
+  window.location.port === "8000"
+    ? window.location.origin
+    : `${window.location.protocol}//${window.location.hostname}:8000`;
+const BASE_URL = `${API_ORIGIN}/api`;
 let pieChart, gainLossBarChart, lineChart, predictionChart, driversChart, clusterChart, urbanChart, populationChart, rainforestChart;
 const LOSS_VISUAL_FACTOR = 10.0;
 
@@ -360,21 +364,68 @@ async function analyze() {
 
     const forecastYears = (prediction.years || []).map(v => safeNumber(v)).filter(v => v !== null);
     const forecastRates = (prediction.rates || []).map(v => safeNumber(v)).filter(v => v !== null);
+    const forecastLower = (prediction.lower || []).map(v => safeNumber(v)).filter(v => v !== null);
+    const forecastUpper = (prediction.upper || []).map(v => safeNumber(v)).filter(v => v !== null);
     const predCtx = document.getElementById("predictionChart").getContext("2d");
     if (predictionChart) predictionChart.destroy();
+    const hasBand = forecastLower.length === forecastRates.length && forecastUpper.length === forecastRates.length;
+    const predDatasets = hasBand ? [
+      {
+        label: "Upper band",
+        data: forecastUpper,
+        borderColor: "transparent",
+        backgroundColor: "transparent",
+        pointRadius: 0,
+        fill: false,
+        tension: 0.3
+      },
+      {
+        label: "Lower band",
+        data: forecastLower,
+        borderColor: "transparent",
+        backgroundColor: "#ef6c0033",
+        pointRadius: 0,
+        fill: "+1",
+        tension: 0.3
+      },
+      {
+        label: "Forecast Tree Cover Loss (ha) [Sheet1+Sheet2]",
+        data: forecastRates,
+        borderColor: "#ef6c00",
+        backgroundColor: "#ef6c0022",
+        borderWidth: 3,
+        fill: false,
+        tension: 0.3,
+        borderDash: [6, 4],
+        pointRadius: 3
+      }
+    ] : [{
+      label: "Forecast Tree Cover Loss (ha) [Sheet1+Sheet2]",
+      data: forecastRates,
+      borderColor: "#ef6c00",
+      backgroundColor: "#ef6c0022",
+      borderWidth: 3,
+      fill: true,
+      tension: 0.3,
+      borderDash: [6, 4],
+      pointRadius: 3
+    }];
+
     predictionChart = new Chart(predCtx, {
       type: "line",
       data: {
         labels: forecastYears,
-        datasets: [{
-          label: "Forecast Tree Cover Loss (ha) [Sheet1+Sheet2]",
-          data: forecastRates,
-          borderColor: "#ef6c00",
-          backgroundColor: "#ef6c0022",
-          borderWidth: 3,
-          fill: true,
-          tension: 0.3
-        }]
+        datasets: predDatasets
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: "Tree Cover Loss (ha)" }
+          }
+        }
       }
     });
 
@@ -420,31 +471,60 @@ async function analyze() {
     const clusterCtx = document.getElementById("clusterChart").getContext("2d");
     if (clusterChart) clusterChart.destroy();
     const riskColor = { Low: "#43a047", Medium: "#f9a825", High: "#e53935" };
-    const clusterDatasets = (districtClusters || []).map(d => ({
-      label: `${d.district} (${d.risk_zone})`,
-      data: [{ x: safeNumber(d.avg_loss_ha) ?? 0, y: safeNumber(d.avg_gas_mg) ?? 0 }],
-      backgroundColor: riskColor[d.risk_zone] || "#607d8b",
-      pointRadius: 6
-    }));
+    const clusterPoints = (districtClusters || []).map(d => {
+      const loss = safeNumber(d.avg_loss_ha) ?? 0;
+      const gas = safeNumber(d.avg_gas_mg) ?? 0;
+      const radius = 10;
+      return {
+        x: loss,
+        y: gas,
+        r: radius,
+        label: d.district,
+        risk: d.risk_zone
+      };
+    });
     clusterChart = new Chart(clusterCtx, {
-      type: "scatter",
+      type: "bubble",
       data: {
-        datasets: clusterDatasets
+        datasets: [{
+          label: "District risk clusters",
+          data: clusterPoints,
+          backgroundColor: clusterPoints.map(p => (riskColor[p.risk] || "#607d8b") + "cc"),
+          borderColor: clusterPoints.map(p => riskColor[p.risk] || "#607d8b"),
+          borderWidth: 2,
+          hoverBorderWidth: 3,
+          hoverRadius: 12
+        }]
       },
       options: {
+        responsive: true,
         scales: {
-          x: { title: { display: true, text: "Average Loss (ha)" } },
-          y: { title: { display: true, text: "Average Gas (Mg)" } }
+          x: { 
+            title: { display: true, text: "Avg Loss Cluster (ha)" },
+            beginAtZero: true,
+            grid: { color: "rgba(0,0,0,0.08)" }
+          },
+          y: { 
+            title: { display: true, text: "Avg Gas Cluster (Mg)" },
+            beginAtZero: true,
+            grid: { color: "rgba(0,0,0,0.08)" }
+          }
         },
         plugins: {
           tooltip: {
             callbacks: {
               label: function(ctx) {
                 const p = ctx.raw || {};
-                return `${ctx.dataset.label}: Loss ${Number(p.x || 0).toFixed(2)}, Gas ${Number(p.y || 0).toFixed(2)}`;
+                return `${p.label || "District"} (${p.risk || "N/A"}): Loss ${Number(p.x || 0).toFixed(2)}ha, Gas ${Number(p.y || 0).toFixed(2)}Mg`;
               }
             }
+          },
+          legend: {
+            display: false
           }
+        },
+        animation: {
+          duration: 1000
         }
       }
     });
@@ -535,6 +615,14 @@ async function analyze() {
       .filter(d => String(d.risk_zone) === "High")
       .map(d => d.district)
       .join(", ");
+    const trainR2 = safeNumber(prediction.model_accuracy_r2);
+    const cvR2 = safeNumber(prediction.cv_r2);
+    const cvMae = safeNumber(prediction.cv_mae);
+    const cvRmse = safeNumber(prediction.cv_rmse);
+    const fallbackUsed = Boolean(prediction.used_fallback);
+    const reliabilityStatus =
+      prediction.reliability_status ||
+      (cvR2 === null ? "Unknown" : (cvR2 < 0 ? "Unreliable" : (cvR2 < 0.3 ? "Use with caution" : "Reliable")));
     report.innerHTML = `
       <h3>Summary</h3>
       <p><b>State:</b> West Bengal</p>
@@ -547,10 +635,11 @@ async function analyze() {
       <p><b>Net (ha):</b> ${(safeNumber(gainLoss.net) ?? 0).toFixed(2)}</p>
       <p><b>Change (%):</b> ${(safeNumber(gainLoss.change) ?? 0).toFixed(4)}</p>
       <p><b>Prediction Model:</b> ${prediction.model_name || "Combined regression (Sheet1 + Sheet2)"}</p>
-      <p><b>Model Accuracy (R²):</b> ${safeNumber(prediction.model_accuracy_r2) === null ? "N/A" : safeNumber(prediction.model_accuracy_r2).toFixed(4)}</p>
-      <p><b>Validation R² (CV):</b> ${safeNumber(prediction.cv_r2) === null ? "N/A" : safeNumber(prediction.cv_r2).toFixed(4)}</p>
-      <p><b>Validation MAE (CV):</b> ${safeNumber(prediction.cv_mae) === null ? "N/A" : safeNumber(prediction.cv_mae).toFixed(4)}</p>
-      <p><b>Validation RMSE (CV):</b> ${safeNumber(prediction.cv_rmse) === null ? "N/A" : safeNumber(prediction.cv_rmse).toFixed(4)}</p>
+      <p><b>Forecast Reliability:</b> ${reliabilityStatus}${fallbackUsed ? " (fallback used)" : ""}</p>
+      <p><b>Validation R² (CV):</b> ${cvR2 === null ? "N/A" : cvR2.toFixed(4)}</p>
+      <p><b>Validation MAE (CV):</b> ${cvMae === null ? "N/A" : cvMae.toFixed(4)}</p>
+      <p><b>Validation RMSE (CV):</b> ${cvRmse === null ? "N/A" : cvRmse.toFixed(4)}</p>
+      <p><b>Training R²:</b> ${trainR2 === null ? "N/A" : trainR2.toFixed(4)}</p>
       <p><b>Training Samples:</b> ${safeNumber(prediction.training_samples) === null ? "N/A" : Math.round(safeNumber(prediction.training_samples))}</p>
       <p><b>High Risk Districts (Clustering):</b> ${highRiskDistricts || "None"}</p>
     `;

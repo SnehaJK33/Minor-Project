@@ -1,0 +1,23 @@
+{
+  "name": "deforestation---copy-(5)---copy---copy",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SnehaJK33/Minor-Project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/SnehaJK33/Minor-Project/issues"
+  },
+  "homepage": "https://github.com/SnehaJK33/Minor-Project#readme",
+  "description": "",
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}
