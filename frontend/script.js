@@ -1,7 +1,7 @@
 const API_ORIGIN =
-  window.location.port === "8000"
-    ? window.location.origin
-    : `${window.location.protocol}//${window.location.hostname}:8000`;
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : window.location.origin;
 const BASE_URL = `${API_ORIGIN}/api`;
 
 const locationSelect = document.getElementById("location");
