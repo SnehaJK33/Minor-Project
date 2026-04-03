@@ -289,7 +289,33 @@ analyzeBtn.addEventListener("click", async () => {
 // -------------------------------------
 // DOWNLOAD PDF BUTTON
 // -------------------------------------
-downloadBtn.addEventListener("click", () => {
+async function captureFullReportCanvas() {
+  if (typeof html2canvas !== "function") {
+    throw new Error("html2canvas library missing");
+  }
+
+  const target = document.body;
+  const docEl = document.documentElement;
+  const bg = getComputedStyle(document.body).backgroundColor || "#ffffff";
+  const prevScrollX = window.scrollX;
+  const prevScrollY = window.scrollY;
+
+  window.scrollTo(0, 0);
+  await new Promise((r) => setTimeout(r, 80));
+
+  const canvas = await html2canvas(target, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: bg,
+    windowWidth: docEl.scrollWidth,
+    windowHeight: docEl.scrollHeight
+  });
+
+  window.scrollTo(prevScrollX, prevScrollY);
+  return canvas;
+}
+
+downloadBtn.addEventListener("click", async () => {
   const location = locationSelect.value.trim();
 
   if (!location) {
@@ -297,7 +323,45 @@ downloadBtn.addEventListener("click", () => {
     return;
   }
 
-  window.open(`${BASE_URL}/report/${encodeURIComponent(location)}`, "_blank");
+  const originalText = downloadBtn.textContent;
+  downloadBtn.disabled = true;
+  downloadBtn.textContent = "Preparing PDF...";
+
+  try {
+    const canvas = await captureFullReportCanvas();
+    if (!window.jspdf || typeof window.jspdf.jsPDF !== "function") {
+      throw new Error("jsPDF library missing");
+    }
+
+    const safeName = location.replace(/\s+/g, "_");
+    const imgData = canvas.toDataURL("image/png");
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pdfWidth;
+    const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+    let heightLeft = imgHeight;
+    let position = 0;
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pdfHeight;
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+    }
+
+    pdf.save(`${safeName}_dashboard.pdf`);
+  } catch (err) {
+    console.error("PDF download failed:", err);
+    alert("Could not generate PDF. Please try again.");
+  } finally {
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = originalText;
+  }
 });
 
 // -------------------------------------
@@ -575,6 +639,8 @@ function renderCharts(history, future, gainHa = 0) {
   });
 
 }
+
+
 
 
 
