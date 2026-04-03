@@ -144,6 +144,7 @@ const API_ORIGIN =
     ? `${window.location.protocol}//${window.location.hostname}:8000`
     : window.location.origin;
 const BASE_URL = `${API_ORIGIN}/api`;
+let pieChart, gainLossBarChart, lineChart, predictionChart, driversChart, clusterChart, urbanChart, populationChart, rainforestChart;
 const LOSS_VISUAL_FACTOR = 10.0;
 
 function safeNumber(v) {
